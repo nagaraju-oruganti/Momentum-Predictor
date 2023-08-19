@@ -52,4 +52,4 @@ l10n/
 notebooks/playground.ipynb
 #models
 *.pth
-*.csv
+*long_Tickers.csv
