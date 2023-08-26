@@ -85,3 +85,27 @@ class Config:
     # Batch sizes
     train_batch_size = 16
     valid_batch_size = 32
+    
+    
+    #### PRETRAIN CONFIGURATION
+    objective_pretrain = False
+    pretrain_config = dict(
+        data_dir                    = '/Volumes/Oruganti',
+        reverse_sample              = 0.5,
+        hourly                      = False,
+        daily                       = True,
+        daily_vol_thresh_file       = 'pretrain_daily_volume_thresholds.pkl',
+        hourly_vol_thresh_file      = 'pretrain_hourly_volume_thresholds.pkl',
+        daily_suffix_for_ticker     = 'd',
+        hourly_suffix_for_ticker    = 'h',
+        load_weights_from           = None
+    )
+    
+    pretrain_folds = {
+        1 : {
+            'train': ('01-01-2000', '12-31-2019'),
+            'valid': ('01-01-2020', '12-31-2023')
+        },
+    }
+    
+    ignore_macd = True

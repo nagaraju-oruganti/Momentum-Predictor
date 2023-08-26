@@ -184,6 +184,12 @@ def train(config):
                             num_layers  = 2, 
                             output_size = 4, 
                             device      = device)
+    
+    if config.pretrain_config['load_weights_from'] != None:
+        path = os.path.join(config.models_dir, config.pretrain_config['load_weights_from'])
+        model.load_state_dict(torch.load(path, map_location=torch.device('cpu'))['model_state_dict'])
+        print(f'Loaded pretrained weights from path: {path}')
+        
     model.to(device)
     
     # optmizer and scheduler

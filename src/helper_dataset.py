@@ -5,6 +5,7 @@ import pickle
 from pyts.image import GramianAngularField
 from tqdm import tqdm
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from tqdm import tqdm
 
 import torch
 from torchvision import transforms
@@ -31,18 +32,58 @@ class VolumeBars:
         self.short_period = self.config.short_period
         self.signal_period = self.config.signal_period
     
-    def load_data(self):    
-        self.df = pd.read_csv(f'{self.data_dir}/long_TICKERS.csv')
-        self.df['Datetime'] = pd.to_datetime(self.df['Datetime'])
+    def load_data(self):
+        if self.config.objective_pretrain:
+            self.df = self.load_data_for_pretrain()
+            self.df['Datetime'] = pd.to_datetime(self.df['Datetime'], utc = True)
+            
+            self.load_vol_threshold_for_pretrain()
+            self.config.tickers = self.df['tic'].unique().tolist()[:1000]
+            self.config.splits['train'] = (self.df['Datetime'].min(), self.df['Datetime'].max())
+        else:
+            self.df = pd.read_csv(f'{self.data_dir}/long_TICKERS.csv')
+            self.df['Datetime'] = pd.to_datetime(self.df['Datetime'])
+            
+    def load_data_for_pretrain(self):
+        dfs = []
+        data_dict = {
+            'daily' : self.config.pretrain_config['daily'],
+            'hourly' : self.config.pretrain_config['hourly'],
+        }
+        for kind, include in data_dict.items():
+            if include:
+                source_path = self.config.pretrain_config['data_dir'] + f'/{kind}_data.pqt'
+                df = pd.read_parquet(source_path)
+                df.reset_index(inplace = True, drop = False)
+                df.rename(columns = {'Date' : 'Datetime', 'index' : 'Datetime', 'ticker' : 'tic'}, inplace = True)
+                df['tic'] = df['tic'].apply(lambda x: f'{kind[0]}_{x}')
+                dfs.append(df)
+        
+        df = pd.concat(dfs)
+        return df
+    
+    def load_vol_threshold_for_pretrain(self):
+        thresholds = {}
+        for kind in ['daily', 'hourly']:
+            with open(self.config.data_dir + f'/pretrain_{kind}_volume_thresholds.pkl', 'rb') as f:
+                dict_thresh = pickle.load(f)
+                dict_thresh = {f'{kind[0]}_{tic}' : v for tic, v in dict_thresh.items()}
+                thresholds.update(dict_thresh)
+        
+        self.config.dict_volume_threshold = thresholds
         
     def make_one_ticker(self, ticker):
         volume_threshold = int(self.config.dict_volume_threshold[ticker])
         tick_df = self.df[self.df['tic'] == ticker][['Datetime'] + self.config.features]
-        macd_line, signal_line, macd_histogram = talib.MACD(tick_df['Close'], 
-                                                            fastperiod = self.short_period,
-                                                            slowperiod = self.long_period,
-                                                            signalperiod = self.signal_period)
-        tick_df['macd'] = macd_histogram
+        if not self.config.ignore_macd:
+            macd_line, signal_line, macd_histogram = talib.MACD(tick_df['Close'], 
+                                                                fastperiod = self.short_period,
+                                                                slowperiod = self.long_period,
+                                                                signalperiod = self.signal_period)
+            tick_df['macd'] = macd_histogram
+        else:
+            tick_df['macd'] = 0
+            
         start_condition = tick_df['Datetime'] >= self.config.splits['train'][0]
         end_condition   = tick_df['Datetime']  < self.config.splits['train'][1]
         df = tick_df[start_condition & end_condition]
@@ -104,9 +145,9 @@ class VolumeBars:
                 }
                 item.update(dict_chg)
                 item.update({
-                    'sum_macd': np.sum(D['macd']),
-                    'mu_macd' : np.mean(D['macd']),
-                    'dispersion_macd': np.std(D['macd']) / np.mean(D['macd'])
+                    'sum_macd': np.sum(D['macd']) if not self.config.ignore_macd else 0,
+                    'mu_macd' : np.mean(D['macd']) if not self.config.ignore_macd else 0,
+                    'dispersion_macd': np.std(D['macd']) / np.mean(D['macd']) if not self.config.ignore_macd else 0
                     })
                 volume_bars.append(item)
                 
@@ -125,7 +166,8 @@ class VolumeBars:
 
     def make(self):
         dfs = []
-        for tick in self.config.tickers:
+        que = tqdm(self.config.tickers, total = len(self.config.tickers), desc = 'Preprocessing')
+        for tick in que:
             df = self.make_one_ticker(tick)
             
             # normalize
@@ -136,6 +178,8 @@ class VolumeBars:
             
             dfs.append(df)
             
+            que.set_postfix({'ticker': tick})
+            
         df = pd.concat(dfs)
 
         return df
@@ -145,10 +189,11 @@ class Preprocesser:
         self.config = config
         self.load_volume_bars()
         
-    def load_volume_bars(self):
-        path = os.path.join(self.config.data_dir, 'train_volume_bars.csv')
+    def load_volume_bars(self):            
+        path = os.path.join(self.config.data_dir, 
+                            'pretrain_volume_bars.pqt' if self.config.objective_pretrain else 'train_volume_bars.pqt')
         if os.path.exists(path):
-            self.df = pd.read_csv(path)
+            self.df = pd.read_parquet(path)
         else:
             self.df = VolumeBars(self.config).make()
             self.df.to_csv(path)
@@ -167,9 +212,10 @@ class Preprocesser:
         self.df.sort_values(by = 'end', ascending = True, inplace = True)
         
     def make(self):
-        path = os.path.join(self.config.data_dir, 'norm_train_volume_bars.csv')
+        path = os.path.join(self.config.data_dir, 
+                            'norm_pretrain_volume_bars.pqt' if self.config.objective_pretrain else  'norm_train_volume_bars.pqt')
         if os.path.exists(path):
-            self.df = pd.read_csv(path, index_col = 0)
+            self.df = pd.read_parquet(path)
         else:
             self.load_volume_bars()
             self.normalize()
@@ -266,7 +312,7 @@ class LstmDataset(Dataset):
         momentum_targets = ['open', 'high', 'low', 'close']
         
         data = []
-        for ticker in self.config.tickers:
+        for ticker in self.df['ticker'].unique():
             sub = self.df[self.df['ticker'] == ticker]
             sub.sort_values(by = 'start', ascending = True, inplace = True)
             momentum_values = sub[momentum_targets].values.tolist()
@@ -299,34 +345,41 @@ class LstmDataset(Dataset):
         
         image       = torch.tensor(inputs                        , dtype = torch.float32)
         moment      = torch.tensor(sample['momentum_targets']    , dtype = torch.float32)
-        price_chg   = torch.tensor(sample['price_change_targets'], dtype = torch.float32)
+        price_chg   = 0 #torch.tensor(sample['price_change_targets'], dtype = torch.float16)
         
         image = image.permute(1, 0)
         
         return (ticker, start, image, moment, price_chg)
 
-
-
-def get_dataloaders(config, fold):
+def get_dataloaders(config, fold = 1):
     
     # data
-    df = Preprocesser(config).make()
+    prep = Preprocesser(config)
+    df = prep.make()
     df['start'] = pd.to_datetime(df['start'])
     df['end'] = pd.to_datetime(df['end'])
     df.sort_values(by = ['ticker', 'end'], ascending = True)
+
+    if config.objective_pretrain:
+        config.tickers = df['ticker'].unique().tolist()
     
     # fold
-    (start, end) = config.folds[fold]['train']
+    folds = config.folds[fold] if not config.objective_pretrain else config.pretrain_folds[1]
+    (start, end) = folds['train']
     train = df[(df['start'] >= start) & (df['end'] < end)]
     
-    (start, end) = config.folds[fold]['valid']
+    (start, end) = folds['valid']
     valid = df[(df['start'] >= start) & (df['end'] < end)]
     
-    print(len(train), len(valid))
+    ## Subsample tickers
+    train = train[train['ticker'].isin(sorted(train['ticker'].unique().tolist())[300:500])]
+    valid = valid[valid['ticker'].isin(sorted(valid['ticker'].unique().tolist())[:200])]
+    
+    print(len(train), len(valid), valid.head(10_000)['ticker'].nunique())
     
     # datasets
-    train_dataset = LstmDataset(config, train if not config.sample_run else train.head(1000))
-    valid_dataset = LstmDataset(config, valid if not config.sample_run else valid.head(1000))
+    train_dataset = LstmDataset(config, train if not config.sample_run else train.head(10_000))
+    valid_dataset = LstmDataset(config, valid if not config.sample_run else valid.head(10_000))
     
     # dataloaders
     train_loader = DataLoader(train_dataset,
@@ -338,6 +391,8 @@ def get_dataloaders(config, fold):
                               batch_size    = config.train_batch_size,
                               shuffle       = False,
                               drop_last     = False)
+    
+    print(len(train_loader), len(valid_loader))
     
     return train_loader, valid_loader, None
     

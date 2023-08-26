@@ -53,3 +53,6 @@ notebooks/playground.ipynb
 #models
 *.pth
 *long_Tickers.csv
+src/delete.py
+*.pqt
+data/*.pkl
