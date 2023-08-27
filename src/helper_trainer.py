@@ -43,8 +43,8 @@ def evaluate(model, dataloader, device):
     y_trues = np.array(y_trues)
     y_preds = np.array(y_preds)
     
-    loss = np.mean(batch_loss_list)
-    rmse = mean_squared_error(y_trues, y_preds)
+    loss = np.mean(batch_loss_list) ** 0.5
+    rmse = mean_squared_error(y_trues, y_preds) ** 0.5
     
     eval_results = [(starts[i], tickers[i], y_trues[i, :], y_preds[i,: ]) for i in range(y_trues.shape[0])]
     
@@ -132,6 +132,12 @@ def trainer(config, model, train_loader, valid_loader, optimizer, scheduler):
     eval_results = []
     ref_score, counter = 1e3, 0
     train_loss, valid_loss, train_f1, valid_f1 = 0, 0, 0, 0
+    
+    ## Evaluation baseline before training
+    print('Baseline:')
+    epoch = -1
+    ref_score, counter, done = run_evaluation_sequence(ref_score, counter)
+    
     for epoch in range(NUM_EPOCHS):
         model.train()
         batch_loss_list = []
@@ -181,7 +187,7 @@ def train(config):
     #model = CNNRegressor(config, num_outputs=10)
     model = HSLSTMRegressor(input_size  = config.max_len, 
                             hidden_size = config.max_len * 2,
-                            num_layers  = 2, 
+                            num_layers  = config.num_lstm_layers, 
                             output_size = 4, 
                             device      = device)
     

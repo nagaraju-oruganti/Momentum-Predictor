@@ -56,6 +56,7 @@ class Config:
     tickers  = ['ATOM', 'AVAX', 'BNB', 'BTC', 'ETC', 'ETH', 'LINK', 'LTC', 'SOL', 'XMR']
     max_len  = 64
     n_forward = 1
+    num_lstm_layers = 2
     
     ### Gramian Angular Field
     params = dict(
@@ -85,7 +86,6 @@ class Config:
     # Batch sizes
     train_batch_size = 16
     valid_batch_size = 32
-    
     
     #### PRETRAIN CONFIGURATION
     objective_pretrain = False

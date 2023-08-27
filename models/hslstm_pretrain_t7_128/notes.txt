@@ -1,9 +1,0 @@
-For pertaining, the suffix number do not corresponds to the fold but rather a batch of tickers considered. The batches are sorted by train tickers as follows
-
-1. Tickers from 0 to 299
-2. Tickers from 300 to 499
-3. Tickers from 500 to 700
-
-Model weights from the previous batch is used to the current batch.
-
-Becasue of limited memory, I had to take this step.
