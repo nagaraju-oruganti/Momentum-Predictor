@@ -312,7 +312,7 @@ class LstmDataset(Dataset):
         momentum_targets = ['open', 'high', 'low', 'close']
         
         data = []
-        for ticker in self.df['ticker'].unique():
+        for ticker in tqdm(self.df['ticker'].unique(), total = self.df['ticker'].nunique()):
             sub = self.df[self.df['ticker'] == ticker]
             sub.sort_values(by = 'start', ascending = True, inplace = True)
             momentum_values = sub[momentum_targets].values.tolist()
