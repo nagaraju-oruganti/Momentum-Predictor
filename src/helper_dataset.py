@@ -372,8 +372,8 @@ def get_dataloaders(config, fold = 1):
     valid = df[(df['start'] >= start) & (df['end'] < end)]
     
     ## Subsample tickers
-    train = train[train['ticker'].isin(sorted(train['ticker'].unique().tolist())[:400])]
-    valid = valid[valid['ticker'].isin(sorted(valid['ticker'].unique().tolist())[:200])]
+    train = train[train['ticker'].isin(sorted(train['ticker'].unique().tolist()))]#[:400])]
+    valid = valid[valid['ticker'].isin(sorted(valid['ticker'].unique().tolist()))]#[:200])]
     
     print(len(train), len(valid), valid.head(10_000)['ticker'].nunique())
     
