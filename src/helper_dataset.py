@@ -372,8 +372,8 @@ def get_dataloaders(config, fold = 1):
     valid = df[(df['start'] >= start) & (df['end'] < end)]
     
     ## Subsample tickers
-    n_train_tics = config.pretrain_config.n_train_tickers
-    n_valid_tics = config.pretrain_config.n_valid_tickers
+    n_train_tics = config.pretrain_config['n_train_tickers']
+    n_valid_tics = config.pretrain_config['n_valid_tickers']
     train = train[train['ticker'].isin(sorted(train['ticker'].unique().tolist())[:n_train_tics])]
     valid = valid[valid['ticker'].isin(sorted(valid['ticker'].unique().tolist())[:n_valid_tics])]
     
