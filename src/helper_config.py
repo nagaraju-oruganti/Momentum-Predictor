@@ -98,7 +98,9 @@ class Config:
         hourly_vol_thresh_file      = 'pretrain_hourly_volume_thresholds.pkl',
         daily_suffix_for_ticker     = 'd',
         hourly_suffix_for_ticker    = 'h',
-        load_weights_from           = None
+        load_weights_from           = None,
+        n_train_tickers             = 400,
+        n_valid_tickers             = 200,
     )
     
     pretrain_folds = {
