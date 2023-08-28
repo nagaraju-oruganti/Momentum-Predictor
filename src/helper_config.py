@@ -54,9 +54,11 @@ class Config:
     ### Features and tickers
     features = ['Open', 'High', 'Low', 'Volume', 'Close']
     tickers  = ['ATOM', 'AVAX', 'BNB', 'BTC', 'ETC', 'ETH', 'LINK', 'LTC', 'SOL', 'XMR']
+    model_kind = 'hslstm'
     max_len  = 64
     n_forward = 1
-    num_lstm_layers = 2
+    num_heads = 4
+    num_layers = 2
     train_on_rmse = False
     fine_tune = False
     dropout_prob = 0

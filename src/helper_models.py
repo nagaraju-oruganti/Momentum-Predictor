@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import math
 
 class CNNRegressor(nn.Module):
     def __init__(self, config, num_outputs):
@@ -82,8 +83,20 @@ class HSLSTMRegressor(nn.Module):
         return out, loss
         
         
-import torch
-import torch.nn as nn
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, max_seq_len):
+        super(PositionalEncoding, self).__init__()
+        pe = torch.zeros(max_seq_len, d_model)
+        position = torch.arange(0, max_seq_len, dtype=torch.float32).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        x = x + self.pe[:, :x.size(1)]
+        return x
 
 class TransformerModel(nn.Module):
     def __init__(self, input_dim, output_dim, seq_length, num_heads, num_layers, hidden_dim):
@@ -91,7 +104,7 @@ class TransformerModel(nn.Module):
 
         # Input embedding
         self.embedding = nn.Linear(input_dim, hidden_dim)
-        self.positional_encoding = self.get_positional_encoding(seq_length, hidden_dim)
+        self.positional_encoding = PositionalEncoding(hidden_dim, seq_length)
         
         # Transformer encoder
         encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_dim, nhead=num_heads)
@@ -103,25 +116,26 @@ class TransformerModel(nn.Module):
         
     def forward(self, x, y = None):
         # Embed input and add positional encodings
-        x = self.embedding(x) + self.positional_encoding
-        x = x.permute(1, 0, 2)  # Reshape for transformer
+        x = self.embedding(x)
+        x = self.positional_encoding(x)
         
         # Pass through the transformer encoder
         encoder_output = self.encoder(x)
-        
+                
         # Project to output dimension
         out = self.decoder(encoder_output)
+        out = out.permute(1, 0, 2)[-1, :, :]        # last layer output
         if y is None:
             return out
         
         loss = self.loss_fn(out, y)
         return out, loss
     
-    def get_positional_encoding(self, seq_length, hidden_dim):
-        # Generate sinusoidal positional encodings
-        position = torch.arange(0, seq_length).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, hidden_dim, 2) * -(math.log(10000.0) / hidden_dim))
-        pos_enc = torch.zeros(seq_length, hidden_dim)
-        pos_enc[:, 0::2] = torch.sin(position * div_term)
-        pos_enc[:, 1::2] = torch.cos(position * div_term)
-        return pos_enc
+    # def get_positional_encoding(self, seq_length, hidden_dim):
+    #     # Generate sinusoidal positional encodings
+    #     position = torch.arange(0, seq_length).unsqueeze(1)
+    #     div_term = torch.exp(torch.arange(0, hidden_dim, 2) * -(math.log(10000.0) / hidden_dim))
+    #     pos_enc = torch.zeros(seq_length, hidden_dim)
+    #     pos_enc[:, 0::2] = torch.sin(position * div_term)
+    #     pos_enc[:, 1::2] = torch.cos(position * div_term)
+    #     return pos_enc

@@ -16,7 +16,7 @@ from datetime import datetime
 from sklearn.metrics import mean_squared_error
 
 ## Local imports
-from helper_models import CNNRegressor, HSLSTMRegressor
+from helper_models import CNNRegressor, HSLSTMRegressor, TransformerModel
 from helper_dataset import get_dataloaders, get_batchloader
 
 import warnings
@@ -155,13 +155,15 @@ def trainer(config, train, model, train_loader, valid_loader, optimizer, schedul
             for i, (_, _, images, targets, _) in que:
                 
                 ###### TRAINING SECQUENCE            
-                with autocast(device_type = str(device), dtype = precision):
+                #with autocast(device_type = str(device), dtype = precision):
+                with autocast(enabled=True, device_type = str(device), dtype=precision) as _autocast, \
+                    torch.backends.cuda.sdp_kernel(enable_flash=False) as disable :
                     _, loss = model(images.to(device), targets.to(device))            # Forward pass
                     if config.train_on_rmse:
                         loss **= 0.5
                     loss = loss / iters_to_accumlate
                 
-                # - Accmulates scaled gradients    
+                # - Accmulates scaled gradients  
                 scaler.scale(loss).backward()           # scale loss
                 
                 if (i + 1) % iters_to_accumlate == 0:
@@ -195,14 +197,22 @@ def train(config):
     os.makedirs(config.dest_path, exist_ok=True)
     
     # define model
+    if config.model_kind == 'hslstm':
     #model = CNNRegressor(config, num_outputs=10)
-    model = HSLSTMRegressor(input_size  = config.max_len, 
-                            hidden_size = config.max_len * 2,
-                            num_layers  = config.num_lstm_layers, 
-                            output_size = 4, 
-                            device      = device,
-                            dropout_prob = config.dropout_prob,
-                            fine_tune   = config.fine_tune)
+        model = HSLSTMRegressor(input_size  = config.max_len, 
+                                hidden_size = config.max_len * 2,
+                                num_layers  = config.num_layers, 
+                                output_size = 4, 
+                                device      = device,
+                                dropout_prob = config.dropout_prob,
+                                fine_tune   = config.fine_tune)
+    elif config.model_kind == 'transformer':
+        model = TransformerModel(input_dim = config.max_len,
+                                 output_dim = 4,
+                                 seq_length= config.max_len,
+                                 num_heads= config.num_heads,
+                                 num_layers= config.num_layers,
+                                 hidden_dim=config.max_len * 2)
     
     if config.pretrain_config['load_weights_from'] != None:
         path = os.path.join(config.models_dir, config.pretrain_config['load_weights_from'])
@@ -233,16 +243,17 @@ if __name__ == '__main__':
     
     config = Config()
     config.fold = 1
-    config.data_dir = '/Users/Oruganti/Downloads/data'
+    config.data_dir = 'data'
     config.models_dir = 'models' 
     config.model_name = 'hslstm_delete'
+    config.model_kind = 'transformer'
     config.iters_to_accumlate = 1
     config.sample_run = True
     config.learning_rate = 1e-3
     config.num_epochs = 200
     config.save_epoch_wait = 1    
     config.early_stop_count = 20
-    config.save_checkpoint = True
+    config.save_checkpoint = False
     config.time_steps = 4
     config.n_forward = 2
     
