@@ -57,6 +57,9 @@ class Config:
     max_len  = 64
     n_forward = 1
     num_lstm_layers = 2
+    train_on_rmse = False
+    fine_tune = False
+    dropout_prob = 0
     
     ### Gramian Angular Field
     params = dict(
@@ -86,6 +89,11 @@ class Config:
     # Batch sizes
     train_batch_size = 16
     valid_batch_size = 32
+    
+    # train with batches    (better way to manage memory with training on batches at the expense of clock time)
+    train_batches = 1       # default is 1 - means batching will have no effect
+    batch_indices = [200, 400, 600, 800, 1000]
+    batch_dir = None        # save batches of dataset to the local directory and load which training
     
     #### PRETRAIN CONFIGURATION
     objective_pretrain = False

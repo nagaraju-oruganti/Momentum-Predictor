@@ -17,10 +17,12 @@ from sklearn.metrics import mean_squared_error
 
 ## Local imports
 from helper_models import CNNRegressor, HSLSTMRegressor
-from helper_dataset import get_dataloaders
+from helper_dataset import get_dataloaders, get_batchloader
 
 import warnings
 warnings.filterwarnings('ignore')
+
+import gc
 
 #### Evaluate
 def evaluate(model, dataloader, device):
@@ -51,7 +53,7 @@ def evaluate(model, dataloader, device):
     return rmse, loss, eval_results
 
 #### Trainer
-def trainer(config, model, train_loader, valid_loader, optimizer, scheduler):
+def trainer(config, train, model, train_loader, valid_loader, optimizer, scheduler):
     
     def update_que():
         que.set_postfix({
@@ -95,7 +97,7 @@ def trainer(config, model, train_loader, valid_loader, optimizer, scheduler):
         
         # append results
         lr =  optimizer.param_groups[0]["lr"]
-        results.append((epoch, train_loss, valid_loss, train_rmse, valid_rmse, lr))
+        results.append((epoch, train_loss, valid_loss, train_rmse, valid_rmse, lr, bidx))
         
         # Learning rate scheduler
         eval_metric = valid_loss
@@ -118,7 +120,7 @@ def trainer(config, model, train_loader, valid_loader, optimizer, scheduler):
             pickle.dump(results, f)
         
         return ref_score, counter, done 
-     
+    
     ### MIXED PRECISION
     scaler = amp.GradScaler()
     
@@ -135,39 +137,48 @@ def trainer(config, model, train_loader, valid_loader, optimizer, scheduler):
     
     ## Evaluation baseline before training
     print('Baseline:')
-    epoch = -1
+    epoch, bidx = -1, 0
     ref_score, counter, done = run_evaluation_sequence(ref_score, counter)
     
     for epoch in range(NUM_EPOCHS):
-        model.train()
-        batch_loss_list = []
-
-        que = tqdm(enumerate(train_loader), total = len(train_loader))
-        for i, (_, _, images, targets, _) in que:
+        for bidx in range(config.train_batches):
             
-            ###### TRAINING SECQUENCE            
-            with autocast(device_type = str(device), dtype = precision):
-                _, loss = model(images.to(device), targets.to(device))            # Forward pass
-                loss = loss / iters_to_accumlate
-            
-            # - Accmulates scaled gradients    
-            scaler.scale(loss).backward()           # scale loss
-            
-            if (i + 1) % iters_to_accumlate == 0:
-                scaler.step(optimizer)                  # step
-                scaler.update()
-                optimizer.zero_grad()
-            #######
-            
-            batch_loss_list.append(loss.item())
-            
-            # Update que status
-            update_que()
-        
-        ### Run evaluation sequence
-        ref_score, counter, done = run_evaluation_sequence(ref_score, counter)
-        if done:
-            return results
+            ## Process next batch of training dataset, if multiple batches are used
+            if config.train_batches > 1:
+                del train_loader; _ = gc.collect()
+                train_loader = get_batchloader(train, bidx, config)
+                
+            model.train()
+            batch_loss_list = []
+            que = tqdm(enumerate(train_loader), total = len(train_loader), 
+                       desc = f'Epoch {epoch + 1}' + f" | batch {(bidx+1)}/{config.train_batches}" if config.train_batches > 1 else "")
+            for i, (_, _, images, targets, _) in que:
+                
+                ###### TRAINING SECQUENCE            
+                with autocast(device_type = str(device), dtype = precision):
+                    _, loss = model(images.to(device), targets.to(device))            # Forward pass
+                    if config.train_on_rmse:
+                        loss **= 0.5
+                    loss = loss / iters_to_accumlate
+                
+                # - Accmulates scaled gradients    
+                scaler.scale(loss).backward()           # scale loss
+                
+                if (i + 1) % iters_to_accumlate == 0:
+                    scaler.step(optimizer)                  # step
+                    scaler.update()
+                    optimizer.zero_grad()
+                #######
+                
+                batch_loss_list.append(loss.item())
+                
+                # Update que status
+                update_que()
+                
+            ### Run evaluation sequence
+            ref_score, counter, done = run_evaluation_sequence(ref_score, counter)
+            if done:
+                return results
             
     return results
 
@@ -189,7 +200,9 @@ def train(config):
                             hidden_size = config.max_len * 2,
                             num_layers  = config.num_lstm_layers, 
                             output_size = 4, 
-                            device      = device)
+                            device      = device,
+                            dropout_prob = config.dropout_prob,
+                            fine_tune   = config.fine_tune)
     
     if config.pretrain_config['load_weights_from'] != None:
         path = os.path.join(config.models_dir, config.pretrain_config['load_weights_from'])
@@ -203,10 +216,10 @@ def train(config):
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode = 'min', factor=0.1, patience=4)
     
     # dataloaders
-    train_loader, valid_loader, _ = get_dataloaders(config, fold = config.fold)
+    train, train_loader, valid_loader, _ = get_dataloaders(config, fold = config.fold)
     
     # Trainer
-    results = trainer(config, model, train_loader, valid_loader, optimizer, scheduler)
+    results = trainer(config, train, model, train_loader, valid_loader, optimizer, scheduler)
     
     ### SAVE RESULTS
     with open(os.path.join(config.dest_path, f'results{config.fold}.pkl'), 'wb') as f:

@@ -20,6 +20,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 from scipy.ndimage import gaussian_filter
+import gc
 
 # VOLUME BARS
 class VolumeBars:
@@ -312,7 +313,7 @@ class LstmDataset(Dataset):
         momentum_targets = ['open', 'high', 'low', 'close']
         
         data = []
-        for ticker in tqdm(self.df['ticker'].unique(), total = self.df['ticker'].nunique()):
+        for ticker in tqdm(self.df['ticker'].unique(), total = self.df['ticker'].nunique(), leave = False):
             sub = self.df[self.df['ticker'] == ticker]
             sub.sort_values(by = 'start', ascending = True, inplace = True)
             momentum_values = sub[momentum_targets].values.tolist()
@@ -324,11 +325,11 @@ class LstmDataset(Dataset):
                 if len(patch) == window:
                     inputs              = sub[cols][i:i+window].values
                     moment              = momentum_values[i + window + self.n_forward - 1]
-                    price_changes       = price_change_values[i + window + self.n_forward - 1]
+                    price_changes       = 0#price_change_values[i + window + self.n_forward - 1]
                     data.append({
                         'ticker'                   : ticker,
                         'start'                    : str(sub['start'].values[i + window]),
-                        'inputs'                   : inputs,
+                        'inputs'                   : (inputs - 0.5) * 2,
                         'momentum_targets'         : moment,
                         'price_change_targets'     : price_changes
                         })
@@ -341,13 +342,13 @@ class LstmDataset(Dataset):
         
         sample = self.data[idx]
         ticker, start = sample['ticker'], sample['start']
-        inputs       = (sample['inputs'] - 0.5) * 2
+        #inputs       = (sample['inputs'] - 0.5) * 2
         
-        image       = torch.tensor(inputs                        , dtype = torch.float32)
+        image       = torch.tensor(sample['inputs']              , dtype = torch.float32).permute(1, 0)
         moment      = torch.tensor(sample['momentum_targets']    , dtype = torch.float32)
         price_chg   = 0 #torch.tensor(sample['price_change_targets'], dtype = torch.float16)
         
-        image = image.permute(1, 0)
+        #image = image.permute(1, 0)
         
         return (ticker, start, image, moment, price_chg)
 
@@ -372,34 +373,55 @@ def get_dataloaders(config, fold = 1):
     valid = df[(df['start'] >= start) & (df['end'] < end)]
     
     ## Subsample tickers
-    n_train_tics = config.pretrain_config['n_train_tickers']
-    n_valid_tics = config.pretrain_config['n_valid_tickers']
-    train = train[train['ticker'].isin(sorted(train['ticker'].unique().tolist())[:n_train_tics])]
-    valid = valid[valid['ticker'].isin(sorted(valid['ticker'].unique().tolist())[:n_valid_tics])]
+    if config.objective_pretrain:
+        n_train_tics = config.pretrain_config['n_train_tickers']
+        n_valid_tics = config.pretrain_config['n_valid_tickers']
+        sub_train   = train[train['ticker'].isin(sorted(train['ticker'].unique().tolist())[:n_train_tics])]
+        valid       = valid[valid['ticker'].isin(sorted(valid['ticker'].unique().tolist())[:n_valid_tics])]
     
     print(len(train), len(valid), valid.head(10_000)['ticker'].nunique())
     
-    # datasets
-    train_dataset = LstmDataset(config, train if not config.sample_run else train.head(10_000))
-    valid_dataset = LstmDataset(config, valid if not config.sample_run else valid.head(10_000))
-    
     # dataloaders
-    train_loader = DataLoader(train_dataset,
+    train_loader = DataLoader(LstmDataset(config, (sub_train if config.objective_pretrain else train) if not config.sample_run else train.head(10_000)),
+                              batch_size = config.train_batch_size,
+                              shuffle       = True,
+                              drop_last     = False)
+    
+    valid_loader = DataLoader(LstmDataset(config, valid if not config.sample_run else valid.head(10_000)),
+                              batch_size    = config.valid_batch_size,
+                              shuffle       = False,
+                              drop_last     = False)
+        
+    return train, train_loader, valid_loader, None
+    
+def get_batchloader(train, bidx, config):
+    
+    os.makedirs(config.batch_dir, exist_ok=True)    # make directory if not exist
+   
+    batch_indices   = config.batch_indices
+    tickers         = sorted(train['ticker'].unique().tolist())
+    start           = 0 if bidx == 0 else batch_indices[bidx - 1]
+    end             = min(batch_indices[bidx], len(tickers))
+    data            = train[train['ticker'].isin(tickers[start:end])]
+    
+    batch_path = os.path.join(config.batch_dir, f'dataset_{bidx+1}.pkl')
+    if os.path.exists(batch_path):
+        with open(batch_path, 'rb') as f:
+            dataset = pickle.load(f)
+    else:
+        dataset = LstmDataset(config, data)
+        # save
+        with open(batch_path, 'wb') as f:
+            pickle.dump(dataset, f)
+    
+    train_loader = DataLoader(dataset       = dataset,
                               batch_size    = config.train_batch_size,
                               shuffle       = True,
                               drop_last     = False)
     
-    valid_loader = DataLoader(valid_dataset,
-                              batch_size    = config.train_batch_size,
-                              shuffle       = False,
-                              drop_last     = False)
-    
-    print(len(train_loader), len(valid_loader))
-    
-    return train_loader, valid_loader, None
-    
+    del data; _ = gc.collect()
+    return train_loader
             
-
 if __name__ == '__main__':
     from helper_config import Config
     config = Config()

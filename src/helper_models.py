@@ -41,12 +41,14 @@ class CNNRegressor(nn.Module):
         return logits, loss
     
 class HSLSTMRegressor(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layers, output_size, device):
+    def __init__(self, input_size, hidden_size, num_layers, output_size, device, dropout_prob = 0.0, fine_tune = False):
         super(HSLSTMRegressor, self).__init__()
+        self.fine_tune = fine_tune
         self.num_layers = num_layers
         self.hidden_size = hidden_size
         self.lstm_layers = nn.ModuleList([nn.LSTMCell(input_size, hidden_size)])
         self.lstm_layers.extend([nn.LSTMCell(hidden_size, hidden_size) for _ in range(num_layers - 1)])
+        self.dropout_layers = nn.ModuleList([nn.Dropout(dropout_prob) for _ in range(num_layers)])
         self.linear = nn.Linear(hidden_size, output_size)
         self.loss_fn = torch.nn.MSELoss()
         self.device = device
@@ -64,6 +66,13 @@ class HSLSTMRegressor(nn.Module):
                 else:
                     h[layer], c[layer] = self.lstm_layers[layer](h[layer-1], (h[layer], c[layer]))
                     
+                if self.fine_tune and layer != self.num_layers - 1:
+                    h[layer].detach_()
+                    c[layer].detach_()
+                    
+                if layer == self.num_layers - 1:
+                    h[layer] = self.dropout_layers[layer](h[layer])
+                    
         out = self.linear(h[-1])
         
         if y is None:
@@ -72,3 +81,47 @@ class HSLSTMRegressor(nn.Module):
         loss = self.loss_fn(out, y)
         return out, loss
         
+        
+import torch
+import torch.nn as nn
+
+class TransformerModel(nn.Module):
+    def __init__(self, input_dim, output_dim, seq_length, num_heads, num_layers, hidden_dim):
+        super(TransformerModel, self).__init__()
+
+        # Input embedding
+        self.embedding = nn.Linear(input_dim, hidden_dim)
+        self.positional_encoding = self.get_positional_encoding(seq_length, hidden_dim)
+        
+        # Transformer encoder
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_dim, nhead=num_heads)
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        
+        # Output projection
+        self.decoder = nn.Linear(hidden_dim, output_dim)
+        self.loss_fn = torch.nn.MSELoss()
+        
+    def forward(self, x, y = None):
+        # Embed input and add positional encodings
+        x = self.embedding(x) + self.positional_encoding
+        x = x.permute(1, 0, 2)  # Reshape for transformer
+        
+        # Pass through the transformer encoder
+        encoder_output = self.encoder(x)
+        
+        # Project to output dimension
+        out = self.decoder(encoder_output)
+        if y is None:
+            return out
+        
+        loss = self.loss_fn(out, y)
+        return out, loss
+    
+    def get_positional_encoding(self, seq_length, hidden_dim):
+        # Generate sinusoidal positional encodings
+        position = torch.arange(0, seq_length).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, hidden_dim, 2) * -(math.log(10000.0) / hidden_dim))
+        pos_enc = torch.zeros(seq_length, hidden_dim)
+        pos_enc[:, 0::2] = torch.sin(position * div_term)
+        pos_enc[:, 1::2] = torch.cos(position * div_term)
+        return pos_enc
