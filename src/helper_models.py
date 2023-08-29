@@ -124,7 +124,8 @@ class TransformerModel(nn.Module):
                 
         # Project to output dimension
         out = self.decoder(encoder_output)
-        out = out.permute(1, 0, 2)[-1, :, :]        # last layer output
+        out = out.permute(1, 0, 2)
+        out = torch.mean(out, dim = 0)
         if y is None:
             return out
         
