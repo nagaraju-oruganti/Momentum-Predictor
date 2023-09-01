@@ -31,7 +31,7 @@ def evaluate(model, dataloader, device):
     batch_loss_list = []
     model.eval()
     with torch.no_grad():
-        for (ticker, start, inputs, targets, _) in dataloader:
+        for (ticker, start, end, inputs, targets, _) in dataloader:
             
             logits, loss = model(inputs.to(device), targets.to(device))
             batch_loss_list.append(loss.item())
@@ -152,7 +152,7 @@ def trainer(config, train, model, train_loader, valid_loader, optimizer, schedul
             batch_loss_list = []
             que = tqdm(enumerate(train_loader), total = len(train_loader), 
                        desc = f'Epoch {epoch + 1}' + f" | batch {(bidx+1)}/{config.train_batches}" if config.train_batches > 1 else "")
-            for i, (_, _, images, targets, _) in que:
+            for i, (_, _, _, images, targets, _) in que:
                 
                 ###### TRAINING SECQUENCE            
                 #with autocast(device_type = str(device), dtype = precision):

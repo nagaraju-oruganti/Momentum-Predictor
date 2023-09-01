@@ -32,8 +32,8 @@ class Config:
     ### Train, valid, and test splits
     splits = {
         'train': ('01-01-2021', '06-30-2022'),
-        'valid': ('07-01-2022', '06-30-2022'),
-        'test' : ('07-01-2022', '12-31-2023')
+        #'valid': ('07-01-2022', '06-30-2022'),
+        #'test' : ('07-01-2022', '12-31-2023')
     }
     
     folds = {
@@ -48,7 +48,13 @@ class Config:
         3 : {
             'train': ('01-01-2021', '03-31-2022'),
             'valid': ('04-01-2022', '06-30-2022')
-        }
+        },
+        
+        ### THIS WILL BE USED IN SIMULATION
+        1000: {
+            'train': ('01-01-2021', '12-31-2021'),      # small window to save time
+            'valid': ('01-01-2021', '12-31-2023'),
+        },
     }
     
     ### Features and tickers
@@ -74,6 +80,7 @@ class Config:
     long_period = 26
     short_period = 12
     signal_period = 9
+    prep_for_train = True
     
     dict_volume_threshold = {
         'ATOM'  : 1479932.0,
@@ -121,3 +128,11 @@ class Config:
     }
     
     ignore_macd = True
+    
+    ## SIMULATION PARAMS
+    sim_config = dict(
+        initial_balance = 1_000_000,
+        buy_txn_cost    = 0.05/100.,
+        sell_txn_cost   = 0.03/100.,
+        load_weights_from = None,
+    )

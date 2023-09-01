@@ -90,7 +90,7 @@ class VolumeBars:
         df = tick_df[start_condition & end_condition]
         df.reset_index(inplace = True, drop = True)
         
-        df.sort_values(by = 'Datetime', ascending = True, inplace = True)
+        df.sort_values(by = 'Datetime', ascending = self.config.prep_for_train, inplace = True)
         df.dropna(subset = ['macd'], inplace = True)
         
         volume_bars = []
@@ -105,16 +105,17 @@ class VolumeBars:
         num_ts      = None         # num timestamps
         
         for _, row in df.iterrows():
-            timestamp = row['Datetime']
-            _open = row['Open']
-            _high = row['High']
-            _low = row['Low']
-            _close = row['Close']
-            volume = row['Volume']
+            timestamp   = row['Datetime']
+            _open       = row['Open']
+            _high       = row['High']
+            _low        = row['Low']
+            _close      = row['Close']
+            volume      = row['Volume']
             
             if seq_start == None:
                 seq_start   = timestamp
                 open_price  = _open
+                close_price = _close
                 high_price  = _high
                 low_price   = _low
                 num_ts      = 0
@@ -130,18 +131,19 @@ class VolumeBars:
                 seq_end = timestamp
                 
                 # extact next 
+                ### The following %change only works for training only. (anyway I am not using in the training or in the inference)
                 D = tick_df[tick_df['Datetime'] > seq_end].head(10)
                 dict_chg = {f'delta_{idx}': ((r['Close']/_close) - 1) for idx, (_, r) in enumerate(D.iterrows(), start = 1)}
                 
                 item = {
-                    'ticker': ticker,
-                    'start': seq_start,
-                    'open': open_price,
-                    'low': low_price,
-                    'high': high_price,
-                    'close': _close,
-                    'volume': current_volume,
-                    'end': seq_end,
+                    'ticker'    : ticker,
+                    'start'     : seq_start if self.config.prep_for_train else seq_end,
+                    'open'      : open_price if self.config.prep_for_train else _open,
+                    'low'       : low_price,
+                    'high'      : high_price,
+                    'close'     : _close if self.config.prep_for_train else close_price,
+                    'volume'    : current_volume,
+                    'end'       : seq_end if self.config.prep_for_train else seq_start,
                     'num_timestamps': num_ts,
                 }
                 item.update(dict_chg)
@@ -188,19 +190,24 @@ class VolumeBars:
 class Preprocesser:
     def __init__(self, config):
         self.config = config
+        self.normalizers = {}
         self.load_volume_bars()
         
-    def load_volume_bars(self):            
-        path = os.path.join(self.config.data_dir, 
-                            'pretrain_volume_bars.pqt' if self.config.objective_pretrain else 'train_volume_bars.pqt')
+    def load_volume_bars(self):
+        if self.config.prep_for_train:            
+            path = os.path.join(self.config.data_dir, 
+                                'pretrain_volume_bars.pqt' if self.config.objective_pretrain else 'train_volume_bars.pqt')
+        else:
+            path = os.path.join(self.config.data_dir, 'infer_volume_bars.pqt')
+            
         if os.path.exists(path):
             self.df = pd.read_parquet(path)
         else:
             self.df = VolumeBars(self.config).make()
-            self.df.to_csv(path)
+            self.df.to_parquet(path)
             
     def normalize(self):
-        cols = ['open', 'high', 'low', 'close', 'volume', 'num_timestamps']
+        cols = ['open', 'high', 'low', 'close']#, 'volume', 'num_timestamps']
         dfs = []
         for t in self.config.tickers:
             mm_scaler = MinMaxScaler()
@@ -208,19 +215,27 @@ class Preprocesser:
             mm_scaler.fit(df[cols])
             df[cols] = mm_scaler.transform(df[cols])
             dfs.append(df)
+            self.normalizers[t] = mm_scaler
             
         self.df = pd.concat(dfs)
         self.df.sort_values(by = 'end', ascending = True, inplace = True)
         
     def make(self):
-        path = os.path.join(self.config.data_dir, 
-                            'norm_pretrain_volume_bars.pqt' if self.config.objective_pretrain else  'norm_train_volume_bars.pqt')
+        if self.config.prep_for_train:
+            path = os.path.join(self.config.data_dir, 
+                                'norm_pretrain_volume_bars.pqt' if self.config.objective_pretrain else  'norm_train_volume_bars.pqt')
+        else:
+            path = os.path.join(self.config.data_dir, 'norm_infer_volume_bars.pqt')
+        
         if os.path.exists(path):
             self.df = pd.read_parquet(path)
         else:
             self.load_volume_bars()
             self.normalize()
-            self.df.to_csv(path)
+            self.df.to_parquet(path)
+            norm_filename = 'crypto_normalizer.pkl' if self.config.prep_for_train else 'crypto_infer_normalizer.pkl'
+            with open(os.path.join(self.config.data_dir, norm_filename), 'wb') as f:
+                pickle.dump(self.normalizers, f)
         return self.df
     
 ## DATASET
@@ -325,10 +340,11 @@ class LstmDataset(Dataset):
                 if len(patch) == window:
                     inputs              = sub[cols][i:i+window].values
                     moment              = momentum_values[i + window + self.n_forward - 1]
-                    price_changes       = 0#price_change_values[i + window + self.n_forward - 1]
+                    price_changes       = 0 #price_change_values[i + window + self.n_forward - 1]
                     data.append({
                         'ticker'                   : ticker,
                         'start'                    : str(sub['start'].values[i + window]),
+                        'end'                      : str(sub['end'].values[i + window]),
                         'inputs'                   : (inputs - 0.5) * 2,
                         'momentum_targets'         : moment,
                         'price_change_targets'     : price_changes
@@ -341,7 +357,7 @@ class LstmDataset(Dataset):
     def __getitem__(self, idx):
         
         sample = self.data[idx]
-        ticker, start = sample['ticker'], sample['start']
+        ticker, start, end = sample['ticker'], sample['start'], sample['end']
         #inputs       = (sample['inputs'] - 0.5) * 2
         
         image       = torch.tensor(sample['inputs']              , dtype = torch.float32).permute(1, 0)
@@ -350,7 +366,7 @@ class LstmDataset(Dataset):
         
         #image = image.permute(1, 0)
         
-        return (ticker, start, image, moment, price_chg)
+        return (ticker, start, end, image, moment, price_chg)
 
 def get_dataloaders(config, fold = 1):
     
@@ -426,4 +442,6 @@ if __name__ == '__main__':
     from helper_config import Config
     config = Config()
     config.data_dir = '/Users/Oruganti/Downloads/data'
-    _,_ = get_dataloaders(config, fold = 1)
+    config.prep_for_train = False
+    prep = Preprocesser(config)
+    df = prep.make()
