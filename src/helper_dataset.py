@@ -338,17 +338,21 @@ class LstmDataset(Dataset):
             for i in range(len(sub)-window-self.n_forward, -1, -step_size):
                 patch = sub[momentum_targets][i:i+window]
                 if len(patch) == window:
-                    inputs              = sub[cols][i:i+window].values
-                    moment              = momentum_values[i + window + self.n_forward - 1]
-                    price_changes       = 0 #price_change_values[i + window + self.n_forward - 1]
-                    data.append({
-                        'ticker'                   : ticker,
-                        'start'                    : str(sub['start'].values[i + window]),
-                        'end'                      : str(sub['end'].values[i + window]),
-                        'inputs'                   : (inputs - 0.5) * 2,
-                        'momentum_targets'         : moment,
-                        'price_change_targets'     : price_changes
-                        })
+                    try:
+                        inputs              = sub[cols][i:i+window].values
+                        #moment              = momentum_values[i + window + self.n_forward - 1]
+                        moment              = [momentum_values[i + window + f - 1] for f in [1, 2, 3, 4, 5, 6, 7]]
+                        price_changes       = 0 #price_change_values[i + window + self.n_forward - 1]
+                        data.append({
+                            'ticker'                   : ticker,
+                            'start'                    : str(sub['start'].values[i + window]),
+                            'end'                      : str(sub['end'].values[i + window]),
+                            'inputs'                   : (inputs - 0.5) * 2,
+                            'momentum_targets'         : moment,
+                            'price_change_targets'     : price_changes
+                            })
+                    except:
+                        pass
         return data
     
     def __len__(self):

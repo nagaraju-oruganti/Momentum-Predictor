@@ -66,7 +66,7 @@ class Config:
     num_heads = 4
     num_layers = 2
     train_on_rmse = False
-    fine_tune = False
+    fine_tune = True
     dropout_prob = 0
     
     ### Gramian Angular Field

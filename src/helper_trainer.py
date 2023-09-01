@@ -16,7 +16,7 @@ from datetime import datetime
 from sklearn.metrics import mean_squared_error
 
 ## Local imports
-from helper_models import CNNRegressor, HSLSTMRegressor, TransformerModel
+from helper_models import CNNRegressor, HSLSTMRegressor, RecursiveHSLSTMRegressor, TransformerModel
 from helper_dataset import get_dataloaders, get_batchloader
 
 import warnings
@@ -46,10 +46,14 @@ def evaluate(model, dataloader, device):
     y_preds = np.array(y_preds)
     
     loss = np.mean(batch_loss_list) ** 0.5
-    rmse = mean_squared_error(y_trues, y_preds) ** 0.5
     
-    eval_results = [(starts[i], tickers[i], y_trues[i, :], y_preds[i,: ]) for i in range(y_trues.shape[0])]
+    rmses = []
+    for i in range(y_trues.shape[1]):
+        rmses.append((i + 1, round(mean_squared_error(y_trues[:, i, :], y_preds[:, i, :]) ** 0.5, 6)))
     
+    rmse = mean_squared_error(y_trues.reshape(-1, 4), y_preds.reshape(-1, 4)) ** 0.5
+    eval_results = []#[(starts[i], tickers[i], y_trues[i, :], y_preds[i,: ]) for i in range(y_trues.shape[0])]
+    print(rmses)
     return rmse, loss, eval_results
 
 #### Trainer
@@ -206,6 +210,14 @@ def train(config):
                                 device      = device,
                                 dropout_prob = config.dropout_prob,
                                 fine_tune   = config.fine_tune)
+    elif config.model_kind == 'recur_hslstm':
+        model = RecursiveHSLSTMRegressor(input_size  = config.max_len, 
+                                hidden_size = config.max_len * 2,
+                                num_layers  = config.num_layers, 
+                                output_size = 4, 
+                                device      = device,
+                                dropout_prob = config.dropout_prob,
+                                fine_tune   = config.fine_tune)
     elif config.model_kind == 'transformer':
         model = TransformerModel(input_dim = config.max_len,
                                  output_dim = 4,
@@ -246,7 +258,7 @@ if __name__ == '__main__':
     config.data_dir = 'data'
     config.models_dir = 'models' 
     config.model_name = 'hslstm_delete'
-    config.model_kind = 'transformer'
+    config.model_kind = 'recur_hslstm'
     config.iters_to_accumlate = 1
     config.sample_run = True
     config.learning_rate = 1e-3

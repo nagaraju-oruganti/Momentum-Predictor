@@ -81,6 +81,48 @@ class HSLSTMRegressor(nn.Module):
         
         loss = self.loss_fn(out, y)
         return out, loss
+    
+class RecursiveHSLSTMRegressor(nn.Module):
+    def __init__(self, input_size, hidden_size, num_layers, output_size, device, dropout_prob = 0.0, fine_tune = False):
+        super(RecursiveHSLSTMRegressor, self).__init__()
+        self.fine_tune = fine_tune
+        self.num_layers = num_layers
+        self.hidden_size = hidden_size * 7
+        self.output_size = output_size * 7
+        self.lstm_layers = nn.ModuleList([nn.LSTMCell(input_size, self.hidden_size)])
+        self.lstm_layers.extend([nn.LSTMCell(self.hidden_size, self.hidden_size) for _ in range(num_layers - 1)])
+        self.dropout_layers = nn.ModuleList([nn.Dropout(dropout_prob) for _ in range(num_layers)])
+        self.linear = nn.Linear(self.hidden_size, self.output_size)
+        self.loss_fn = torch.nn.MSELoss()
+        self.device = device
+        
+    def forward(self, x, y):
+        h, c = [], []
+        for _ in range(self.num_layers):
+            h.append(torch.zeros(x.size(0), self.hidden_size).to(self.device))
+            c.append(torch.zeros(x.size(0), self.hidden_size).to(self.device))
+        
+        for t in range(x.size(1)):
+            for layer in range(self.num_layers):
+                if layer == 0:
+                    h[layer], c[layer] = self.lstm_layers[layer](x[:,t,:], (h[layer], c[layer]))
+                else:
+                    h[layer], c[layer] = self.lstm_layers[layer](h[layer-1], (h[layer], c[layer]))
+                    
+                if self.fine_tune and layer != self.num_layers - 1:
+                    h[layer].detach_()
+                    c[layer].detach_()
+                    
+                if layer == self.num_layers - 1:
+                    h[layer] = self.dropout_layers[layer](h[layer])
+                        
+        out  = self.linear(h[-1]).view(y.shape[0], 7, -1)
+        loss = self.loss_fn(out, y)
+        
+        if y is None:
+            return out
+        
+        return out, loss
         
         
 class PositionalEncoding(nn.Module):
