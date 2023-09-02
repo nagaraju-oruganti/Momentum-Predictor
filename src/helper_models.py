@@ -87,8 +87,8 @@ class RecursiveHSLSTMRegressor(nn.Module):
         super(RecursiveHSLSTMRegressor, self).__init__()
         self.fine_tune = fine_tune
         self.num_layers = num_layers
-        self.hidden_size = hidden_size * 7
-        self.output_size = output_size * 7
+        self.hidden_size = hidden_size
+        self.output_size = output_size
         self.lstm_layers = nn.ModuleList([nn.LSTMCell(input_size, self.hidden_size)])
         self.lstm_layers.extend([nn.LSTMCell(self.hidden_size, self.hidden_size) for _ in range(num_layers - 1)])
         self.dropout_layers = nn.ModuleList([nn.Dropout(dropout_prob) for _ in range(num_layers)])
@@ -97,31 +97,44 @@ class RecursiveHSLSTMRegressor(nn.Module):
         self.device = device
         
     def forward(self, x, y):
+
         h, c = [], []
         for _ in range(self.num_layers):
             h.append(torch.zeros(x.size(0), self.hidden_size).to(self.device))
             c.append(torch.zeros(x.size(0), self.hidden_size).to(self.device))
+                
+        output = []
+        loss = 0
         
-        for t in range(x.size(1)):
-            for layer in range(self.num_layers):
-                if layer == 0:
-                    h[layer], c[layer] = self.lstm_layers[layer](x[:,t,:], (h[layer], c[layer]))
-                else:
-                    h[layer], c[layer] = self.lstm_layers[layer](h[layer-1], (h[layer], c[layer]))
-                    
-                if self.fine_tune and layer != self.num_layers - 1:
-                    h[layer].detach_()
-                    c[layer].detach_()
-                    
-                if layer == self.num_layers - 1:
-                    h[layer] = self.dropout_layers[layer](h[layer])
+        for i in range(y.size(1)):
+            if i > 0:
+                x = torch.cat((x[:, :, 1:], out.unsqueeze(2)), dim=2)
+                
+            for t in range(x.size(1)):
+                for layer in range(self.num_layers):
+                    if layer == 0:
+                        h[layer], c[layer] = self.lstm_layers[layer](x[:,t,:], (h[layer], c[layer]))
+                    else:
+                        h[layer], c[layer] = self.lstm_layers[layer](h[layer-1], (h[layer], c[layer]))
                         
-        out  = self.linear(h[-1]).view(y.shape[0], 7, -1)
-        loss = self.loss_fn(out, y)
+                    if self.fine_tune and layer != self.num_layers - 1:
+                        h[layer].detach_()
+                        c[layer].detach_()
+                        
+                    if layer == self.num_layers - 1:
+                        h[layer] = self.dropout_layers[layer](h[layer])
+                            
+            out  = self.linear(h[-1])
+            loss += self.loss_fn(out, y[:, i, :]) #* ((y.size(1) - (i + 1)) / y.size(1))
+            
+            output.append(out)
+            
+        out = torch.stack(output, dim = 1)
+        loss = loss / y.size(1)
         
         if y is None:
             return out
-        
+
         return out, loss
         
         
